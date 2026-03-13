@@ -46,17 +46,11 @@ static void draw_top(lv_obj_t *canvas, const struct status_state *state) {
   rotate_canvas(canvas);
 }
 
-/* Middle canvas (center): BOREK pixel art */
+/* Middle canvas (center): custom pixel art */
 static void draw_middle(lv_obj_t *canvas) {
   fill_background(canvas);
 
-  /* BOREK at 2x scale: 5*5*2 + 4*2 = 58 wide, 7*2 = 14 tall */
-  int32_t art_w = (5 * 5 * 2) + (4 * 2); /* 58 */
-  int32_t art_h = 7 * 2;                 /* 14 */
-  int32_t ax = (68 - art_w) / 2;         /* 5 */
-  int32_t ay = (68 - art_h) / 2;         /* 27 */
-
-  draw_borek_art(canvas, ax, ay, 2, LVGL_FOREGROUND);
+  draw_custom_art(canvas, LVGL_FOREGROUND);
 
   rotate_canvas(canvas);
 }
