@@ -95,7 +95,7 @@ void draw_custom_art(lv_obj_t *canvas, lv_color_t color) {
         for (int col = 0; col < ART_W; col++) {
             int byte_idx = col / 8;
             int bit_idx = 7 - (col % 8);
-            if (row_data[byte_idx] & (1 << bit_idx)) {
+            if (!(row_data[byte_idx] & (1 << bit_idx))) {
                 canvas_draw_rect(canvas, col, row, 1, 1, &rect_dsc);
             }
         }
