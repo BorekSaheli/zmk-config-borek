@@ -14,7 +14,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 
 #include "art.h"
+#include "art/art_list.h"
 #include "screen.h"
+#include "../src/image_sync.h"
 
 
 static sys_slist_t widgets = SYS_SLIST_STATIC_INIT(&widgets);
@@ -46,11 +48,11 @@ static void draw_top(lv_obj_t *canvas, const struct status_state *state) {
   rotate_canvas(canvas);
 }
 
-/* Middle canvas (center): custom pixel art */
-static void draw_middle(lv_obj_t *canvas) {
+/* Middle canvas (center): custom pixel art — which image is driven by image_sync */
+static void draw_middle(lv_obj_t *canvas, uint8_t idx) {
   fill_background(canvas);
 
-  draw_custom_art(canvas, LVGL_FOREGROUND);
+  draw_custom_art(canvas, LVGL_FOREGROUND, idx);
 
   rotate_canvas(canvas);
 }
@@ -109,6 +111,28 @@ static void update_bottom(struct status_state state) {
   }
 }
 
+static uint8_t current_art_idx;
+static uint8_t pending_art_idx;
+static struct k_work art_update_work;
+
+static void redraw_art(void) {
+  struct zmk_widget_screen *widget;
+  SYS_SLIST_FOR_EACH_CONTAINER(&widgets, widget, node) {
+    lv_obj_t *middle = lv_obj_get_child(widget->obj, 1);
+    draw_middle(middle, current_art_idx);
+  }
+}
+
+static void art_update_work_cb(struct k_work *work) {
+  current_art_idx = pending_art_idx;
+  redraw_art();
+}
+
+static void on_image_sync(uint8_t idx) {
+  pending_art_idx = idx;
+  k_work_submit(&art_update_work);
+}
+
 static void full_update(struct status_state state) {
   struct zmk_widget_screen *widget;
   SYS_SLIST_FOR_EACH_CONTAINER(&widgets, widget, node) {
@@ -118,7 +142,7 @@ static void full_update(struct status_state state) {
     draw_top(top, &widget->state);
 
     lv_obj_t *middle = lv_obj_get_child(widget->obj, 1);
-    draw_middle(middle);
+    draw_middle(middle, current_art_idx);
 
     lv_obj_t *bottom = lv_obj_get_child(widget->obj, 2);
     draw_bottom(bottom, &widget->state);
@@ -170,8 +194,12 @@ int zmk_widget_screen_init(struct zmk_widget_screen *widget, lv_obj_t *parent) {
   /* Initial draw */
   widget->state = get_state(NULL);
   draw_top(top, &widget->state);
-  draw_middle(middle);
+  current_art_idx = image_sync_get_index();
+  draw_middle(middle, current_art_idx);
   draw_bottom(bottom, &widget->state);
+
+  k_work_init(&art_update_work, art_update_work_cb);
+  image_sync_register_listener(on_image_sync);
 
   widget_battery_init();
   widget_layer_init();

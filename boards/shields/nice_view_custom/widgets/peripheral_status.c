@@ -10,6 +10,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include "peripheral_status.h"
 #include "art.h"
+#include "art/art_list.h"
+#include "../src/image_sync.h"
 
 static sys_slist_t widgets = SYS_SLIST_STATIC_INIT(&widgets);
 
@@ -32,11 +34,11 @@ static void draw_top(lv_obj_t *canvas, const struct status_state *state) {
     rotate_canvas(canvas);
 }
 
-/* Middle canvas: custom pixel art */
-static void draw_art(lv_obj_t *canvas) {
+/* Middle canvas: custom pixel art — which image is driven by image_sync */
+static void draw_art(lv_obj_t *canvas, uint8_t idx) {
     fill_background(canvas);
 
-    draw_custom_art(canvas, LVGL_FOREGROUND);
+    draw_custom_art(canvas, LVGL_FOREGROUND, idx);
 
     rotate_canvas(canvas);
 }
@@ -61,6 +63,24 @@ ZMK_DISPLAY_WIDGET_LISTENER(widget_peripheral, struct status_state, update_cb, g
 ZMK_SUBSCRIPTION(widget_peripheral, zmk_battery_state_changed);
 ZMK_SUBSCRIPTION(widget_peripheral, zmk_split_peripheral_status_changed);
 
+static uint8_t current_art_idx;
+static uint8_t pending_art_idx;
+static struct k_work art_update_work;
+
+static void art_update_work_cb(struct k_work *work) {
+    current_art_idx = pending_art_idx;
+    struct zmk_widget_screen *widget;
+    SYS_SLIST_FOR_EACH_CONTAINER(&widgets, widget, node) {
+        lv_obj_t *art = lv_obj_get_child(widget->obj, 1);
+        draw_art(art, current_art_idx);
+    }
+}
+
+static void on_image_sync(uint8_t idx) {
+    pending_art_idx = idx;
+    k_work_submit(&art_update_work);
+}
+
 int zmk_widget_screen_init(struct zmk_widget_screen *widget, lv_obj_t *parent) {
     /* Container */
     widget->obj = lv_obj_create(parent);
@@ -82,7 +102,11 @@ int zmk_widget_screen_init(struct zmk_widget_screen *widget, lv_obj_t *parent) {
 
     widget->state = get_state(NULL);
     draw_top(top, &widget->state);
-    draw_art(art);
+
+    k_work_init(&art_update_work, art_update_work_cb);
+    current_art_idx = image_sync_get_index();
+    draw_art(art, current_art_idx);
+    image_sync_register_listener(on_image_sync);
 
     widget_peripheral_init();
 
