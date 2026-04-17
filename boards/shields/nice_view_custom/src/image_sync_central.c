@@ -1,7 +1,9 @@
 /*
- * Central side: owns the hourly rotation counter, updates its own displayed
- * index, and pushes the peripheral's index over a custom GATT characteristic
- * on the split connection.
+ * Central side: owns the hourly rotation counter, pushes the peripheral's
+ * image index over one GATT characteristic, and mirrors the current
+ * keymap layer label over a second one. Peripheral reads both and updates
+ * its own display accordingly — needed because ZMK's keymap / layer_state
+ * event APIs are compiled only on central.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -14,74 +16,149 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/logging/log.h>
 
+#include <zmk/event_manager.h>
+#include <zmk/events/layer_state_changed.h>
+#include <zmk/keymap.h>
+
 #include "image_sync.h"
 #include "../widgets/art/art_list.h"
 
 LOG_MODULE_REGISTER(image_sync_central, CONFIG_ZMK_LOG_LEVEL);
 
 static struct bt_uuid_128 svc_uuid = BT_UUID_INIT_128(IMAGE_SYNC_SERVICE_UUID);
-static struct bt_uuid_128 chr_uuid = BT_UUID_INIT_128(IMAGE_SYNC_CHAR_UUID);
+static struct bt_uuid_128 img_chr_uuid = BT_UUID_INIT_128(IMAGE_SYNC_CHAR_UUID);
+static struct bt_uuid_128 layer_chr_uuid = BT_UUID_INIT_128(LAYER_SYNC_CHAR_UUID);
 
 static struct bt_conn *peripheral_conn;
-static uint16_t char_handle;
+static uint16_t img_char_handle;
+static uint16_t layer_char_handle;
+static uint16_t svc_end_handle;
 static struct bt_gatt_discover_params discover_params;
 
 static uint32_t hour_counter;
 static uint8_t local_idx;
-static image_sync_listener_t listener_cb;
+static image_sync_listener_t img_listener_cb;
+
+static char current_label[LAYER_SYNC_LABEL_MAX];
 
 static struct k_timer hour_timer;
 static struct k_work_delayable discover_work;
-static struct k_work push_work;
+static struct k_work push_img_work;
+static struct k_work push_layer_work;
 
 static void push_peripheral_idx(void) {
-    if (!peripheral_conn || !char_handle) {
+    if (!peripheral_conn || !img_char_handle) {
         return;
     }
     uint8_t idx = (hour_counter + 1) % ART_IMAGES_COUNT;
-    int err = bt_gatt_write_without_response(peripheral_conn, char_handle, &idx, 1, false);
+    int err = bt_gatt_write_without_response(peripheral_conn, img_char_handle, &idx, 1, false);
     if (err) {
-        LOG_WRN("image_sync write failed: %d", err);
+        LOG_WRN("image_sync idx write failed: %d", err);
     }
 }
 
-static void push_work_cb(struct k_work *work) {
+static void push_peripheral_layer(void) {
+    if (!peripheral_conn || !layer_char_handle) {
+        return;
+    }
+    size_t len = strnlen(current_label, LAYER_SYNC_LABEL_MAX - 1) + 1;
+    int err = bt_gatt_write_without_response(peripheral_conn, layer_char_handle, current_label,
+                                             len, false);
+    if (err) {
+        LOG_WRN("image_sync layer write failed: %d", err);
+    }
+}
+
+static void push_img_work_cb(struct k_work *work) {
     ARG_UNUSED(work);
     push_peripheral_idx();
 }
 
+static void push_layer_work_cb(struct k_work *work) {
+    ARG_UNUSED(work);
+    push_peripheral_layer();
+}
+
+static void update_local_label(void) {
+    uint8_t layer = zmk_keymap_highest_layer_active();
+    const char *name = zmk_keymap_layer_name(layer);
+    if (!name) {
+        snprintk(current_label, sizeof(current_label), "Layer %u", layer);
+    } else {
+        strncpy(current_label, name, sizeof(current_label) - 1);
+        current_label[sizeof(current_label) - 1] = '\0';
+    }
+}
+
 static void update_local(void) {
     local_idx = hour_counter % ART_IMAGES_COUNT;
-    if (listener_cb) {
-        listener_cb(local_idx);
+    if (img_listener_cb) {
+        img_listener_cb(local_idx);
     }
 }
 
 uint8_t image_sync_get_index(void) { return local_idx; }
 
 void image_sync_register_listener(image_sync_listener_t cb) {
-    listener_cb = cb;
+    img_listener_cb = cb;
     if (cb) {
         cb(local_idx);
     }
 }
 
+/* On central, layer state is available via existing ZMK APIs — the sync
+ * service's layer-listener API is peripheral-only. These stubs keep the
+ * header surface identical across both sides. */
+const char *layer_sync_get_label(void) { return current_label; }
+void layer_sync_register_listener(layer_sync_listener_t cb) { ARG_UNUSED(cb); }
+
 static void hour_tick(struct k_timer *t) {
     ARG_UNUSED(t);
     hour_counter++;
     update_local();
-    k_work_submit(&push_work);
+    k_work_submit(&push_img_work);
 }
 
-static uint8_t char_discover_cb(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-                                struct bt_gatt_discover_params *params) {
+static int layer_event_cb(const zmk_event_t *eh) {
+    ARG_UNUSED(eh);
+    update_local_label();
+    k_work_submit(&push_layer_work);
+    return 0;
+}
+
+ZMK_LISTENER(image_sync_layer, layer_event_cb);
+ZMK_SUBSCRIPTION(image_sync_layer, zmk_layer_state_changed);
+
+static uint8_t layer_char_discover_cb(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                      struct bt_gatt_discover_params *params) {
     if (!attr) {
-        LOG_DBG("image_sync char discovery done (handle=%u)", char_handle);
+        LOG_DBG("image_sync discovery done (img=%u, layer=%u)",
+                img_char_handle, layer_char_handle);
+        /* Push current state so the peripheral catches up. */
+        k_work_submit(&push_img_work);
+        k_work_submit(&push_layer_work);
         return BT_GATT_ITER_STOP;
     }
-    char_handle = bt_gatt_attr_value_handle(attr);
-    LOG_DBG("image_sync char found, handle=%u", char_handle);
-    k_work_submit(&push_work);
+    layer_char_handle = bt_gatt_attr_value_handle(attr);
+    return BT_GATT_ITER_STOP;
+}
+
+static uint8_t img_char_discover_cb(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                    struct bt_gatt_discover_params *params) {
+    if (!attr) {
+        return BT_GATT_ITER_STOP;
+    }
+    img_char_handle = bt_gatt_attr_value_handle(attr);
+    /* Chain into the second characteristic discovery. */
+    discover_params.uuid = &layer_chr_uuid.uuid;
+    discover_params.start_handle = attr->handle + 1;
+    discover_params.end_handle = svc_end_handle;
+    discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
+    discover_params.func = layer_char_discover_cb;
+    int err = bt_gatt_discover(conn, &discover_params);
+    if (err) {
+        LOG_WRN("layer_sync char discover start failed: %d", err);
+    }
     return BT_GATT_ITER_STOP;
 }
 
@@ -91,11 +168,13 @@ static uint8_t svc_discover_cb(struct bt_conn *conn, const struct bt_gatt_attr *
         LOG_DBG("image_sync service not found on peripheral");
         return BT_GATT_ITER_STOP;
     }
-    discover_params.uuid = &chr_uuid.uuid;
+    const struct bt_gatt_service_val *svc = attr->user_data;
+    svc_end_handle = svc ? svc->end_handle : 0xffff;
+    discover_params.uuid = &img_chr_uuid.uuid;
     discover_params.start_handle = attr->handle + 1;
-    discover_params.end_handle = 0xffff;
+    discover_params.end_handle = svc_end_handle;
     discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
-    discover_params.func = char_discover_cb;
+    discover_params.func = img_char_discover_cb;
     int err = bt_gatt_discover(conn, &discover_params);
     if (err) {
         LOG_WRN("image_sync char discover start failed: %d", err);
@@ -135,7 +214,8 @@ static void connected_cb(struct bt_conn *conn, uint8_t err) {
         return;
     }
     peripheral_conn = bt_conn_ref(conn);
-    char_handle = 0;
+    img_char_handle = 0;
+    layer_char_handle = 0;
     /* Let ZMK's split service finish its own discovery first. */
     k_work_schedule(&discover_work, K_SECONDS(3));
 }
@@ -146,7 +226,8 @@ static void disconnected_cb(struct bt_conn *conn, uint8_t reason) {
     }
     bt_conn_unref(peripheral_conn);
     peripheral_conn = NULL;
-    char_handle = 0;
+    img_char_handle = 0;
+    layer_char_handle = 0;
 }
 
 BT_CONN_CB_DEFINE(image_sync_conn_cb) = {
@@ -159,8 +240,10 @@ static int image_sync_central_init(void) {
                  "image_sync needs at least 2 images so left and right can differ");
     k_timer_init(&hour_timer, hour_tick, NULL);
     k_work_init_delayable(&discover_work, discover_work_cb);
-    k_work_init(&push_work, push_work_cb);
+    k_work_init(&push_img_work, push_img_work_cb);
+    k_work_init(&push_layer_work, push_layer_work_cb);
     update_local();
+    update_local_label();
     k_timer_start(&hour_timer, K_HOURS(1), K_HOURS(1));
     return 0;
 }

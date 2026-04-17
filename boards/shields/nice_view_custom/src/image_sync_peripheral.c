@@ -22,7 +22,10 @@ LOG_MODULE_REGISTER(image_sync_peripheral, CONFIG_ZMK_LOG_LEVEL);
 /* Default 1 so a freshly-booted peripheral doesn't match a freshly-booted
  * central (which starts at 0) while waiting for the first write. */
 static uint8_t current_idx = 1;
-static image_sync_listener_t listener_cb;
+static image_sync_listener_t img_listener_cb;
+
+static char current_label[LAYER_SYNC_LABEL_MAX];
+static layer_sync_listener_t layer_listener_cb;
 
 static ssize_t write_idx_cb(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                              const void *buf, uint16_t len, uint16_t offset, uint8_t flags) {
@@ -35,9 +38,23 @@ static ssize_t write_idx_cb(struct bt_conn *conn, const struct bt_gatt_attr *att
     }
     if (idx != current_idx) {
         current_idx = idx;
-        if (listener_cb) {
-            listener_cb(current_idx);
+        if (img_listener_cb) {
+            img_listener_cb(current_idx);
         }
+    }
+    return len;
+}
+
+static ssize_t write_label_cb(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                               const void *buf, uint16_t len, uint16_t offset, uint8_t flags) {
+    if (offset != 0 || len == 0 || len > LAYER_SYNC_LABEL_MAX) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+    size_t copy = len < LAYER_SYNC_LABEL_MAX - 1 ? len : LAYER_SYNC_LABEL_MAX - 1;
+    memcpy(current_label, buf, copy);
+    current_label[copy] = '\0';
+    if (layer_listener_cb) {
+        layer_listener_cb(current_label);
     }
     return len;
 }
@@ -48,14 +65,27 @@ BT_GATT_SERVICE_DEFINE(image_sync_svc,
                            BT_GATT_CHRC_WRITE_WITHOUT_RESP | BT_GATT_CHRC_WRITE,
                            BT_GATT_PERM_WRITE_ENCRYPT,
                            NULL, write_idx_cb, NULL),
+    BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(LAYER_SYNC_CHAR_UUID),
+                           BT_GATT_CHRC_WRITE_WITHOUT_RESP | BT_GATT_CHRC_WRITE,
+                           BT_GATT_PERM_WRITE_ENCRYPT,
+                           NULL, write_label_cb, NULL),
 );
 
 uint8_t image_sync_get_index(void) { return current_idx; }
 
 void image_sync_register_listener(image_sync_listener_t cb) {
-    listener_cb = cb;
+    img_listener_cb = cb;
     if (cb) {
         cb(current_idx);
+    }
+}
+
+const char *layer_sync_get_label(void) { return current_label; }
+
+void layer_sync_register_listener(layer_sync_listener_t cb) {
+    layer_listener_cb = cb;
+    if (cb) {
+        cb(current_label);
     }
 }
 

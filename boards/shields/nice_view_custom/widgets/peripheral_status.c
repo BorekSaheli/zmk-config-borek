@@ -4,9 +4,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zmk/battery.h>
 #include <zmk/display.h>
-#include <zmk/keymap.h>
 #include <zmk/events/battery_state_changed.h>
-#include <zmk/events/layer_state_changed.h>
 #include <zmk/split/bluetooth/peripheral.h>
 #include <zmk/events/split_peripheral_status_changed.h>
 
@@ -45,35 +43,26 @@ static void draw_art(lv_obj_t *canvas, uint8_t idx) {
     rotate_canvas(canvas);
 }
 
-/* Bottom canvas (left side of display): layer name — mirrors central */
-static void draw_bottom(lv_obj_t *canvas, const struct status_state *state) {
+/* Bottom canvas (left side of display): layer name — pushed by central */
+static void draw_bottom(lv_obj_t *canvas, const char *label) {
     fill_background(canvas);
 
     lv_draw_label_dsc_t label_dsc;
     init_label_dsc(&label_dsc, LVGL_FOREGROUND, lv_font_default(), LV_TEXT_ALIGN_CENTER);
 
-    char text[16];
-    if (state->layer_label) {
-        snprintf(text, sizeof(text), "%s", state->layer_label);
-    } else {
-        snprintf(text, sizeof(text), "Layer %d", state->layer_index);
-    }
-    canvas_draw_text(canvas, 0, 24, 68, &label_dsc, text);
+    canvas_draw_text(canvas, 0, 24, 68, &label_dsc, (label && label[0]) ? label : "---");
 
     rotate_canvas(canvas);
 }
 
 static struct status_state get_state(const zmk_event_t *_eh) {
-    uint8_t layer = zmk_keymap_highest_layer_active();
     return (struct status_state){
         .battery = zmk_battery_state_of_charge(),
         .connected = zmk_split_bt_peripheral_is_connected(),
-        .layer_index = layer,
-        .layer_label = zmk_keymap_layer_name(layer),
     };
 }
 
-static void update_top_cb(struct status_state state) {
+static void update_cb(struct status_state state) {
     struct zmk_widget_screen *widget;
     SYS_SLIST_FOR_EACH_CONTAINER(&widgets, widget, node) {
         widget->state = state;
@@ -82,21 +71,9 @@ static void update_top_cb(struct status_state state) {
     }
 }
 
-static void update_layer_cb(struct status_state state) {
-    struct zmk_widget_screen *widget;
-    SYS_SLIST_FOR_EACH_CONTAINER(&widgets, widget, node) {
-        widget->state = state;
-        lv_obj_t *bottom = lv_obj_get_child(widget->obj, 2);
-        draw_bottom(bottom, &widget->state);
-    }
-}
-
-ZMK_DISPLAY_WIDGET_LISTENER(widget_peripheral, struct status_state, update_top_cb, get_state)
+ZMK_DISPLAY_WIDGET_LISTENER(widget_peripheral, struct status_state, update_cb, get_state)
 ZMK_SUBSCRIPTION(widget_peripheral, zmk_battery_state_changed);
 ZMK_SUBSCRIPTION(widget_peripheral, zmk_split_peripheral_status_changed);
-
-ZMK_DISPLAY_WIDGET_LISTENER(widget_peripheral_layer, struct status_state, update_layer_cb, get_state)
-ZMK_SUBSCRIPTION(widget_peripheral_layer, zmk_layer_state_changed);
 
 static uint8_t current_art_idx;
 static uint8_t pending_art_idx;
@@ -116,6 +93,23 @@ static void on_image_sync(uint8_t idx) {
     k_work_submit(&art_update_work);
 }
 
+static char pending_label[LAYER_SYNC_LABEL_MAX];
+static struct k_work layer_update_work;
+
+static void layer_update_work_cb(struct k_work *work) {
+    struct zmk_widget_screen *widget;
+    SYS_SLIST_FOR_EACH_CONTAINER(&widgets, widget, node) {
+        lv_obj_t *bottom = lv_obj_get_child(widget->obj, 2);
+        draw_bottom(bottom, pending_label);
+    }
+}
+
+static void on_layer_sync(const char *label) {
+    strncpy(pending_label, label ? label : "", sizeof(pending_label) - 1);
+    pending_label[sizeof(pending_label) - 1] = '\0';
+    k_work_submit(&layer_update_work);
+}
+
 int zmk_widget_screen_init(struct zmk_widget_screen *widget, lv_obj_t *parent) {
     /* Container */
     widget->obj = lv_obj_create(parent);
@@ -133,7 +127,7 @@ int zmk_widget_screen_init(struct zmk_widget_screen *widget, lv_obj_t *parent) {
     lv_obj_align(art, LV_ALIGN_TOP_RIGHT, BUFFER_OFFSET_MIDDLE, 0);
     lv_canvas_set_buffer(art, widget->cbuf2, CANVAS_SIZE, CANVAS_SIZE, CANVAS_COLOR_FORMAT);
 
-    /* Canvas 2 — bottom (leftmost): layer */
+    /* Canvas 2 — bottom (leftmost): layer, pushed from central */
     lv_obj_t *bottom = lv_canvas_create(widget->obj);
     lv_obj_align(bottom, LV_ALIGN_TOP_RIGHT, BUFFER_OFFSET_BOTTOM, 0);
     lv_canvas_set_buffer(bottom, widget->cbuf3, CANVAS_SIZE, CANVAS_SIZE, CANVAS_COLOR_FORMAT);
@@ -142,15 +136,17 @@ int zmk_widget_screen_init(struct zmk_widget_screen *widget, lv_obj_t *parent) {
 
     widget->state = get_state(NULL);
     draw_top(top, &widget->state);
-    draw_bottom(bottom, &widget->state);
 
     k_work_init(&art_update_work, art_update_work_cb);
     current_art_idx = image_sync_get_index();
     draw_art(art, current_art_idx);
     image_sync_register_listener(on_image_sync);
 
+    k_work_init(&layer_update_work, layer_update_work_cb);
+    draw_bottom(bottom, layer_sync_get_label());
+    layer_sync_register_listener(on_layer_sync);
+
     widget_peripheral_init();
-    widget_peripheral_layer_init();
 
     return 0;
 }
