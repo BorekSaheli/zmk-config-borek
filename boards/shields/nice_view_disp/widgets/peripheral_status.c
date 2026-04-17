@@ -6,7 +6,6 @@
  */
 
 #include <zephyr/kernel.h>
-#include <zephyr/random/random.h>
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -22,9 +21,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/ble.h>
 
 #include "peripheral_status.h"
-
-LV_IMG_DECLARE(balloon);
-LV_IMG_DECLARE(mountain);
+#include "art/art_list.h"
+#include "../src/image_sync.h"
 
 static sys_slist_t widgets = SYS_SLIST_STATIC_INIT(&widgets);
 
@@ -115,6 +113,15 @@ int art_pos = 0;
 int top_pos = 92;
 #endif
 
+static lv_obj_t *art_obj;
+
+static void on_image_sync(uint8_t idx) {
+    if (!art_obj || idx >= ART_IMAGES_COUNT) {
+        return;
+    }
+    lv_img_set_src(art_obj, art_images[idx]);
+}
+
 int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
     widget->obj = lv_obj_create(parent);
     lv_obj_set_size(widget->obj, 160, 68);
@@ -122,10 +129,10 @@ int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
     lv_obj_align(top, LV_ALIGN_TOP_LEFT, top_pos, 0);
     lv_canvas_set_buffer(top, widget->cbuf, CANVAS_SIZE, CANVAS_SIZE, LV_IMG_CF_TRUE_COLOR);
 
-    lv_obj_t *art = lv_img_create(widget->obj);
-    bool random = sys_rand32_get() & 1;
-    lv_img_set_src(art, random ? &balloon : &mountain);
-    lv_obj_align(art, LV_ALIGN_TOP_LEFT, art_pos, 0);
+    art_obj = lv_img_create(widget->obj);
+    lv_img_set_src(art_obj, art_images[image_sync_get_index() % ART_IMAGES_COUNT]);
+    lv_obj_align(art_obj, LV_ALIGN_TOP_LEFT, art_pos, 0);
+    image_sync_register_listener(on_image_sync);
 
     sys_slist_append(&widgets, &widget->node);
     widget_battery_status_init();

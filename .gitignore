@@ -1,1 +1,3 @@
 .DS_Store
+.venv/
+images/__pycache__/
