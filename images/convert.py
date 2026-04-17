@@ -45,15 +45,15 @@ def to_1bit(png_path: Path) -> bytes:
     img = ImageOps.fit(img, (IMG_W, IMG_H), method=Image.LANCZOS)
     img = img.convert("1", dither=Image.FLOYDSTEINBERG)
 
-    # MSB-first, row-major. A bit set = foreground pixel, matching the
-    # existing draw_custom_art convention where bits == 1 are rendered in
-    # the foreground color. PIL "1" mode uses 255 for white; we treat
-    # *darker* pixels as foreground (bit == 1) so photos look right.
+    # MSB-first, row-major. A bit set = foreground pixel. We treat the
+    # *lighter* pixels as foreground so the rendered result looks inverted
+    # relative to the source photo (light areas drawn in the foreground
+    # color, dark areas left as background).
     out = bytearray(ROW_BYTES * IMG_H)
     px = img.load()
     for y in range(IMG_H):
         for x in range(IMG_W):
-            if not px[x, y]:  # 0 = black in PIL "1" mode
+            if px[x, y]:  # 255 = white in PIL "1" mode
                 out[y * ROW_BYTES + (x >> 3)] |= 0x80 >> (x & 7)
     return bytes(out)
 
