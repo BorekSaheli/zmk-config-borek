@@ -36,6 +36,13 @@
             key-positions = <40 45>;
             bindings = <&tog 3>;
         };
+        combo_caps_word {
+            // F + J fires Caps Word: capitalizes the next word, auto-cancels
+            // at the next space/punctuation. Positions 18 (F) and 23 (J).
+            timeout-ms = <50>;
+            key-positions = <18 23>;
+            bindings = <&caps_word>;
+        };
     };
 
     keymap {
