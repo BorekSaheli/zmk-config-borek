@@ -1,5 +1,6 @@
 /*
- * Central side: owns the hourly rotation counter, pushes the peripheral's
+ * Central side: owns the art rotation counter (advances every 15 min),
+ * pushes the peripheral's
  * image index over one GATT characteristic, and mirrors the current
  * keymap layer label over a second one. Peripheral reads both and updates
  * its own display accordingly — needed because ZMK's keymap / layer_state
@@ -244,7 +245,7 @@ static int image_sync_central_init(void) {
     k_work_init(&push_layer_work, push_layer_work_cb);
     update_local();
     update_local_label();
-    k_timer_start(&hour_timer, K_HOURS(1), K_HOURS(1));
+    k_timer_start(&hour_timer, K_MINUTES(15), K_MINUTES(15));
     return 0;
 }
 
