@@ -2,6 +2,10 @@
  * Copyright (c) 2020 The ZMK Contributors
  *
  * SPDX-License-Identifier: MIT
+ *
+ * NOTE: This is the board's DEFAULT/reference keymap and is NOT what gets
+ * built. The active keymap is config/corne_choc_pro.keymap, which overrides
+ * this one. Edit that file, not this one.
  */
 
 #include <behaviors.dtsi>

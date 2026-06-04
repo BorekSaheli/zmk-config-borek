@@ -1,8 +1,9 @@
 /*
  * Split-sync of the current image index between central and peripheral.
- * Central owns an hour_counter: on each tick it picks
- *   idx_left  =  hour_counter        % N   (its own displayed index)
- *   idx_right = (hour_counter + 1)   % N   (pushed to peripheral)
+ * Central owns a rotation_counter (advances every 15 min): on each tick
+ * it picks
+ *   idx_left  =  rotation_counter        % N   (its own displayed index)
+ *   idx_right = (rotation_counter + 1)   % N   (pushed to peripheral)
  * so the two halves are always different (requires N >= 2).
  *
  * SPDX-License-Identifier: MIT

@@ -19,7 +19,6 @@
 
 struct status_state {
     uint8_t battery;
-    bool charging;
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     struct zmk_endpoint_instance selected_endpoint;
     int active_profile_index;
@@ -29,8 +28,6 @@ struct status_state {
     const char *layer_label;
 #else
     bool connected;
-    uint8_t layer_index;
-    const char *layer_label;
 #endif
 };
 
@@ -38,8 +35,5 @@ void rotate_canvas(lv_obj_t *canvas);
 void fill_background(lv_obj_t *canvas);
 void init_label_dsc(lv_draw_label_dsc_t *label_dsc, lv_color_t color, const lv_font_t *font,
                     lv_text_align_t align);
-void init_rect_dsc(lv_draw_rect_dsc_t *rect_dsc, lv_color_t bg_color);
-void canvas_draw_rect(lv_obj_t *canvas, int32_t x, int32_t y, int32_t w, int32_t h,
-                      lv_draw_rect_dsc_t *rect_dsc);
 void canvas_draw_text(lv_obj_t *canvas, int32_t x, int32_t y, int32_t max_w,
                       lv_draw_label_dsc_t *label_dsc, const char *text);

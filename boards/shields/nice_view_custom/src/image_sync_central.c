@@ -36,13 +36,13 @@ static uint16_t layer_char_handle;
 static uint16_t svc_end_handle;
 static struct bt_gatt_discover_params discover_params;
 
-static uint32_t hour_counter;
+static uint32_t rotation_counter;
 static uint8_t local_idx;
 static image_sync_listener_t img_listener_cb;
 
 static char current_label[LAYER_SYNC_LABEL_MAX];
 
-static struct k_timer hour_timer;
+static struct k_timer rotate_timer;
 static struct k_work_delayable discover_work;
 static struct k_work push_img_work;
 static struct k_work push_layer_work;
@@ -51,7 +51,7 @@ static void push_peripheral_idx(void) {
     if (!peripheral_conn || !img_char_handle) {
         return;
     }
-    uint8_t idx = (hour_counter + 1) % ART_IMAGES_COUNT;
+    uint8_t idx = (rotation_counter + 1) % ART_IMAGES_COUNT;
     int err = bt_gatt_write_without_response(peripheral_conn, img_char_handle, &idx, 1, false);
     if (err) {
         LOG_WRN("image_sync idx write failed: %d", err);
@@ -92,7 +92,7 @@ static void update_local_label(void) {
 }
 
 static void update_local(void) {
-    local_idx = hour_counter % ART_IMAGES_COUNT;
+    local_idx = rotation_counter % ART_IMAGES_COUNT;
     if (img_listener_cb) {
         img_listener_cb(local_idx);
     }
@@ -113,9 +113,9 @@ void image_sync_register_listener(image_sync_listener_t cb) {
 const char *layer_sync_get_label(void) { return current_label; }
 void layer_sync_register_listener(layer_sync_listener_t cb) { ARG_UNUSED(cb); }
 
-static void hour_tick(struct k_timer *t) {
+static void rotate_tick(struct k_timer *t) {
     ARG_UNUSED(t);
-    hour_counter++;
+    rotation_counter++;
     update_local();
     k_work_submit(&push_img_work);
 }
@@ -239,13 +239,13 @@ BT_CONN_CB_DEFINE(image_sync_conn_cb) = {
 static int image_sync_central_init(void) {
     BUILD_ASSERT(ART_IMAGES_COUNT >= 2,
                  "image_sync needs at least 2 images so left and right can differ");
-    k_timer_init(&hour_timer, hour_tick, NULL);
+    k_timer_init(&rotate_timer, rotate_tick, NULL);
     k_work_init_delayable(&discover_work, discover_work_cb);
     k_work_init(&push_img_work, push_img_work_cb);
     k_work_init(&push_layer_work, push_layer_work_cb);
     update_local();
     update_local_label();
-    k_timer_start(&hour_timer, K_MINUTES(15), K_MINUTES(15));
+    k_timer_start(&rotate_timer, K_MINUTES(15), K_MINUTES(15));
     return 0;
 }
 
