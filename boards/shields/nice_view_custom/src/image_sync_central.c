@@ -45,6 +45,10 @@ static struct k_timer hour_timer;
 static struct k_work_delayable discover_work;
 static struct k_work push_img_work;
 static struct k_work push_layer_work;
+static struct k_work cleanup_work;
+static struct bt_conn *stale_conn;
+
+static void update_local_label(void);
 
 static void push_peripheral_idx(void) {
     if (!peripheral_conn || !img_char_handle) {
@@ -76,6 +80,10 @@ static void push_img_work_cb(struct k_work *work) {
 
 static void push_layer_work_cb(struct k_work *work) {
     ARG_UNUSED(work);
+    /* Read the layer state here on the work queue rather than in the event
+     * callback, so current_label is only ever written on this thread and a
+     * concurrent push can't see a half-written string. */
+    update_local_label();
     push_peripheral_layer();
 }
 
@@ -121,7 +129,6 @@ static void hour_tick(struct k_timer *t) {
 
 static int layer_event_cb(const zmk_event_t *eh) {
     ARG_UNUSED(eh);
-    update_local_label();
     k_work_submit(&push_layer_work);
     return 0;
 }
@@ -220,14 +227,27 @@ static void connected_cb(struct bt_conn *conn, uint8_t err) {
     k_work_schedule(&discover_work, K_SECONDS(3));
 }
 
+static void cleanup_work_cb(struct k_work *work) {
+    ARG_UNUSED(work);
+    if (stale_conn) {
+        bt_conn_unref(stale_conn);
+        stale_conn = NULL;
+    }
+}
+
 static void disconnected_cb(struct bt_conn *conn, uint8_t reason) {
     if (conn != peripheral_conn) {
         return;
     }
-    bt_conn_unref(peripheral_conn);
-    peripheral_conn = NULL;
     img_char_handle = 0;
     layer_char_handle = 0;
+    k_work_cancel_delayable(&discover_work);
+    /* Hand our conn ref to the system work queue for release: the GATT push
+     * works run on that same single-threaded queue, so any push already in
+     * flight finishes with a valid ref before the unref happens. */
+    stale_conn = peripheral_conn;
+    peripheral_conn = NULL;
+    k_work_submit(&cleanup_work);
 }
 
 BT_CONN_CB_DEFINE(image_sync_conn_cb) = {
@@ -242,6 +262,7 @@ static int image_sync_central_init(void) {
     k_work_init_delayable(&discover_work, discover_work_cb);
     k_work_init(&push_img_work, push_img_work_cb);
     k_work_init(&push_layer_work, push_layer_work_cb);
+    k_work_init(&cleanup_work, cleanup_work_cb);
     update_local();
     update_local_label();
     k_timer_start(&hour_timer, K_HOURS(1), K_HOURS(1));

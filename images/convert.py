@@ -2,7 +2,7 @@
 nice_view_custom shield.
 
 The nice_view_custom widgets render each image by iterating pixels and
-calling lv_canvas_draw_rect for every foreground pixel — so we emit a
+calling lv_canvas_set_px for every foreground pixel — so we emit a
 plain packed-bit array, not an LVGL image descriptor.
 
 Produces:
