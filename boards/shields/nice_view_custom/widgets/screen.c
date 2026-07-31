@@ -130,7 +130,9 @@ static void art_update_work_cb(struct k_work *work) {
 
 static void on_image_sync(uint8_t idx) {
   pending_art_idx = idx;
-  k_work_submit(&art_update_work);
+  /* LVGL is single-threaded: all drawing must run on the display work
+   * queue, never the system one (which also carries key/BLE processing). */
+  k_work_submit_to_queue(zmk_display_work_q(), &art_update_work);
 }
 
 static void full_update(struct status_state state) {

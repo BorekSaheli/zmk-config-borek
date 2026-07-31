@@ -28,13 +28,14 @@
         };
     };
 
-    combos {
-        compatible = "zmk,combos";
-        combo_bluetooth {
-            // Outer thumb pair toggles the dedicated BT layer (index 3).
-            timeout-ms = <50>;
-            key-positions = <40 45>;
-            bindings = <&tog 3>;
+    conditional_layers {
+        compatible = "zmk,conditional-layers";
+        // Hold both layer thumbs (LWR + RSE) to reach the BT/system layer.
+        // Momentary by design: releasing the thumbs always exits, so the
+        // keyboard can never get stuck on the BT layer by accident.
+        bt_tri_layer {
+            if-layers = <1 2>;
+            then-layer = <3>;
         };
     };
 
@@ -62,12 +63,14 @@
             // -----------------------------------------------------------------------------------------
             // |  TAB |  1  |  2  |  3  |  4  |  5    |  LCTRL | RCTRL |  6  |  7  |  8  |  9  |  0  | BSPC |
             // | CTRL |     |     |     |     |       |  LALT  | RALT  | LFT | DWN |  UP | RGT |     |      |
-            // | SHFT |     | RGB | RST | BOOT| Unlock|        |       |     |     |     |     |     |      |
+            // | SHFT |     | RGB |     |     | Unlock|        |       |     |     |     |     |     |      |
             //                    | GUI |     | SPC   |        | ENT   |     | ALT |
+            // RST / BOOT moved to the BT/system layer so a mis-hit next to
+            // RGB can no longer reset the board or drop it into the bootloader.
             bindings = <
-                &kp TAB   &kp N1 &kp N2          &kp N3     &kp N4      &kp N5         &kp LCTRL &kp RCTRL &kp N6   &kp N7   &kp N8 &kp N9    &kp N0 &kp BSPC
-                &kp LCTRL &trans &trans          &trans     &trans      &trans         &kp LALT  &kp RALT  &kp LEFT &kp DOWN &kp UP &kp RIGHT &trans &trans
-                &kp LSHFT &trans &rgb_ug RGB_TOG &sys_reset &bootloader &studio_unlock                     &trans   &trans   &trans &trans    &trans &trans
+                &kp TAB   &kp N1 &kp N2          &kp N3 &kp N4 &kp N5         &kp LCTRL &kp RCTRL &kp N6   &kp N7   &kp N8 &kp N9    &kp N0 &kp BSPC
+                &kp LCTRL &trans &trans          &trans &trans &trans         &kp LALT  &kp RALT  &kp LEFT &kp DOWN &kp UP &kp RIGHT &trans &trans
+                &kp LSHFT &trans &rgb_ug RGB_TOG &none  &none  &studio_unlock                     &trans   &trans   &trans &trans    &trans &trans
                                                  &trans     &trans      &trans                             &trans   &trans   &trans
             >;
         };
@@ -89,17 +92,17 @@
 
         bluetooth_layer {
             display-name = "BT";
-            // Reached via the outer-thumb combo (&tog 3). Press the same combo again to exit.
+            // Active only while both layer thumbs (LWR + RSE) are held.
             // -----------------------------------------------------------------------------------------
             // |      |     |     |     |     |     |     |     |     |     |     |     |     |      |
             // |      | BT1 | BT2 | BT3 | BT4 | BT5 |     |     |     |     |     |     |     |      |
-            // |      | BTCR|     |     |     |     |                 |     |     |     |     |      |
+            // |      | BTCR|     |     |     |     |                 | RST | BOOT|     |     |      |
             //                    |     |     |     |                 |     |     |     |
             bindings = <
-                &trans &trans       &trans       &trans       &trans       &trans       &trans &trans &trans &trans &trans &trans &trans &trans
-                &trans &bt BT_SEL 0 &bt BT_SEL 1 &bt BT_SEL 2 &bt BT_SEL 3 &bt BT_SEL 4 &trans &trans &trans &trans &trans &trans &trans &trans
-                &trans &bt BT_CLR   &trans       &trans       &trans       &trans                     &trans &trans &trans &trans &trans &trans
-                                                 &trans       &trans       &trans                     &trans &trans &trans
+                &trans &trans       &trans       &trans       &trans       &trans       &trans &trans &trans     &trans      &trans &trans &trans &trans
+                &trans &bt BT_SEL 0 &bt BT_SEL 1 &bt BT_SEL 2 &bt BT_SEL 3 &bt BT_SEL 4 &trans &trans &trans     &trans      &trans &trans &trans &trans
+                &trans &bt BT_CLR   &trans       &trans       &trans       &trans                     &sys_reset &bootloader &trans &trans &trans &trans
+                                                 &trans       &trans       &trans                     &trans     &trans      &trans
             >;
         };
 

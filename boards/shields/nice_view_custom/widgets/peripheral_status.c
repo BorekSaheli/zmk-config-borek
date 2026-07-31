@@ -90,7 +90,9 @@ static void art_update_work_cb(struct k_work *work) {
 
 static void on_image_sync(uint8_t idx) {
     pending_art_idx = idx;
-    k_work_submit(&art_update_work);
+    /* LVGL is single-threaded: all drawing must run on the display work
+     * queue, never the system one (which also carries key/BLE processing). */
+    k_work_submit_to_queue(zmk_display_work_q(), &art_update_work);
 }
 
 static char pending_label[LAYER_SYNC_LABEL_MAX];
@@ -107,7 +109,7 @@ static void layer_update_work_cb(struct k_work *work) {
 static void on_layer_sync(const char *label) {
     strncpy(pending_label, label ? label : "", sizeof(pending_label) - 1);
     pending_label[sizeof(pending_label) - 1] = '\0';
-    k_work_submit(&layer_update_work);
+    k_work_submit_to_queue(zmk_display_work_q(), &layer_update_work);
 }
 
 int zmk_widget_screen_init(struct zmk_widget_screen *widget, lv_obj_t *parent) {
